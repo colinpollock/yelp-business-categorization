@@ -1,7 +1,7 @@
 Yelp Business Categorization
 ============================
 
-I'm using the Yelp Academic Dataset[1] to play with Keras and TensorFlow. The prediction problem is
+I'm using the Yelp Academic Dataset [1] to play with Keras and TensorFlow. The prediction problem is
 to assign categories (like "Restaurant", "Sushi Bar", "Hardware Store", etc.) to Yelp businesses.
 
 
