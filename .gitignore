@@ -1,0 +1,16 @@
+.venv/
+*.swp
+*.swo
+__pycache__/
+.python-version
+.ipynb_checkpoints/
+
+
+# Data that shouldn't be checked in
+business.json
+checkin.json
+review.json
+user.json
+categories.json
+photo.json
+tip.json
