@@ -16,19 +16,34 @@ class NameAndReviewTextFeaturizer(Featurizer):
         super().__init__()
         self._text_featurizer = TextFeaturizer(max_vocab_size, max_length)
 
-    @staticmethod
-    def featurize_example(example):
-        return example.business_name + "\n".join(
-            review.text for review in example.reviews
-        )
-
     def fit(self, examples):
-        texts = (self.featurize_example(example) for example in examples)
+        texts = (make_text_from_example(example) for example in examples)
         self._text_featurizer.fit(texts)
 
     def transform(self, examples):
-        texts = (self.featurize_example(example) for example in examples)
+        texts = (make_text_from_example(example) for example in examples)
         return self._text_featurizer.transform(texts)
+
+
+def make_text_from_example(example):
+    """Glues together the business name with all of the reviews into a long string."""
+    return example.business_name + "\n".join(review.text for review in example.reviews)
+
+
+from sklearn.feature_extraction.text import TfidfVectorizer
+
+
+class TfidfFeaturizer(Featurizer):
+    def __init__(self):
+        self.vectorizer = TfidfVectorizer()
+
+    def fit(self, examples):
+        texts = [make_text_from_example(example) for example in examples]
+        self.vectorizer.fit(texts)
+
+    def transform(self, examples):
+        texts = [make_text_from_example(example) for example in examples]
+        return self.vectorizer.transform(texts)
 
 
 class TextFeaturizer:

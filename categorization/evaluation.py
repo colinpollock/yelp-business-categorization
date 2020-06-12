@@ -57,9 +57,30 @@ def evaluate_model(model, features, label_sets, labelizer, probability_threshold
     return evaluations
 
 
-def evaluate(label_sets, prediction_sets, all_labels=None):
-    if all_labels is None:
-        all_labels = {label for labels in label_sets for label in labels}
+def _get_all_labels(label_sets):
+    return {label for labels in label_sets for label in labels}
+
+def group_by_result(examples, label_sets, prediction_sets):
+    all_labels = _get_all_labels(label_sets)
+    label_to_result_to_data = defaultdict(lambda: {result: [] for result in ('tp', 'fp', 'tn', 'fn')})
+
+    for example, labels, predictions in zip(examples, label_sets, prediction_sets):
+        for label in all_labels:
+            if label in labels:
+                if label in predictions:
+                    result = 'tp'
+                else:
+                    result = 'fn'
+            else:
+                if label in predictions:
+                    result = 'fp'
+                else:
+                    result = 'tn'
+            label_to_result_to_data[label][result].append((example, labels, predictions))
+    return label_to_result_to_data
+
+def evaluate(label_sets, prediction_sets):
+    all_labels = _get_all_labels(label_sets)
 
     results = defaultdict(
         lambda: {result: 0 for result in ("tp", "fp", "tn", "fn", "support")}

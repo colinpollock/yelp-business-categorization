@@ -26,6 +26,7 @@ class DenseTextualModel(Model):
         learning_rate,
         epochs,
         batch_size,
+        embeddings=None,
     ):
         super().__init__()
 
