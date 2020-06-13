@@ -1,6 +1,9 @@
+import numpy as np
 from pandas import Series
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras.preprocessing.text import Tokenizer
+from sklearn.feature_extraction.text import TfidfVectorizer
+from scipy.sparse import hstack
 
 
 class Featurizer:
@@ -10,43 +13,52 @@ class Featurizer:
     def transform(self, examples):
         raise NotImplementedError()
 
+    def fit_transform(self, examples):
+        self.fit(examples)
+        return self.transform(examples)
 
-class NameAndReviewTextFeaturizer(Featurizer):
-    def __init__(self, max_vocab_size, max_length):
+
+class SequenceFeaturizer(Featurizer):
+    def __init__(self, max_vocab_size, max_name_length, max_review_length):
         super().__init__()
-        self._text_featurizer = TextFeaturizer(max_vocab_size, max_length)
+        self._name_featurizer = KerasTokenizer(max_vocab_size, max_name_length)
+        self._review_featurizer = KerasTokenizer(max_vocab_size, max_review_length)
 
     def fit(self, examples):
-        texts = (make_text_from_example(example) for example in examples)
-        self._text_featurizer.fit(texts)
+        names, reviews = _get_name_and_review_texts(examples)
+        self._name_featurizer.fit(names)
+        self._review_featurizer.fit(reviews)
 
     def transform(self, examples):
-        texts = (make_text_from_example(example) for example in examples)
-        return self._text_featurizer.transform(texts)
+        names, reviews = _get_name_and_review_texts(examples)
+        name_features = self._name_featurizer.transform(names)
+        review_features = self._review_featurizer.transform(reviews)
+        return np.concatenate((name_features, review_features), axis=1)
 
 
-def make_text_from_example(example):
-    """Glues together the business name with all of the reviews into a long string."""
-    return example.business_name + "\n".join(review.text for review in example.reviews)
+class TfidfBowFeaturizer(Featurizer):
+    """Simple featurizer that extracts text features separately from the review and business name."""
 
-
-from sklearn.feature_extraction.text import TfidfVectorizer
-
-
-class TfidfFeaturizer(Featurizer):
     def __init__(self):
-        self.vectorizer = TfidfVectorizer()
+        self.name_vectorizer = TfidfVectorizer()
+        self.review_vectorizer = TfidfVectorizer()
 
     def fit(self, examples):
-        texts = [make_text_from_example(example) for example in examples]
-        self.vectorizer.fit(texts)
+        names, reviews = _get_name_and_review_texts(examples)
+        self.name_vectorizer.fit(names)
+        self.review_vectorizer.fit(reviews)
 
     def transform(self, examples):
-        texts = [make_text_from_example(example) for example in examples]
-        return self.vectorizer.transform(texts)
+        names, reviews = _get_name_and_review_texts(examples)
+        name_features = self.name_vectorizer.transform(names)
+        review_features = self.review_vectorizer.transform(reviews)
+
+        return hstack([name_features, review_features]).toarray()
 
 
-class TextFeaturizer:
+class KerasTokenizer:
+    """Simple featurizer that wraps Keras's Tokenizer. Pads and truncates each vector."""
+
     OOV_TOKEN = "<OOV>"
 
     def __init__(self, max_vocab_size, max_length):
@@ -72,3 +84,15 @@ class TextFeaturizer:
         return pad_sequences(
             sequences, maxlen=self.max_length, padding="post", truncating="post"
         )
+
+
+def _get_review_texts(examples):
+    return [example.review.text for example in examples]
+
+
+def _get_name_texts(examples):
+    return [example.business_name for example in examples]
+
+
+def _get_name_and_review_texts(examples):
+    return _get_name_texts(examples), _get_review_texts(examples)

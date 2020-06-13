@@ -1,45 +1,127 @@
 
-from typing import NamedTuple
+from typing import NamedTuple, List
+
+from sklearn.metrics import classification_report
+from sklearn.preprocessing import LabelEncoder
+
 
 import numpy as np
 import pandas as pd
-from collections import defaultdict
 from .featurization import Featurizer
 from .model import Model
+from .data import Example
 
+class PredictedExample(NamedTuple):
+    example: Example
+    label: str
+    prediction: str
 
 class Experiment(NamedTuple):
     featurizer: Featurizer
+    labelizer: LabelEncoder
     model: Model
+
+    train_examples: List[Example]
     train_features: np.ndarray
+    train_labels: List[str]
+    train_predictions: List[str]
+
+    validation_examples: List[Example]
     validation_features: np.ndarray
-    train_metrics: pd.DataFrame
-    validation_metrics: pd.DataFrame
+    validation_labels: str
+    validation_predictions: List[str]
 
-def model_experiment(featurizer, model, labelizer, train_features, train_label_sets, validation_features, validation_label_sets, probability_threshold=0.5):
-    train_labels = labelizer.fit_transform(train_label_sets)
-    validation_labels = labelizer.transform(validation_label_sets)
+    @property
+    def confusion_matrix(self):
+        raise NotImplementedError()
 
-    model.fit(train_features, train_labels, validation_features, validation_labels)
-    train_metrics = evaluate_model(model, train_features, train_label_sets, labelizer, probability_threshold)
-    validation_metrics = evaluate_model(model, validation_features, validation_label_sets, labelizer, probability_threshold)
+    def errors_for_label(self, input_label, use_train):
+        if use_train:
+            examples = self.train_examples
+            labels = self.train_labels
+            predictions = self.train_predictions
+        else:
+            examples = self.validation_examples
+            labels = self.validation_labels
+            predictions = self.validation_predictions
 
-    print("Train Macro:")
-    print(train_metrics[["precision", "recall", "f1"]].mean())
-    print()
-    print("Validation Macro:")
-    print(validation_metrics[["precision", "recall", "f1"]].mean())
-    return Experiment(featurizer, model, train_features, validation_features, train_metrics, validation_metrics)
+        tp = []
+        fp = []
+        tn = []
+        fn = []
+
+        for example, label, prediction in zip(examples, labels, predictions):
+            predicted_example = PredictedExample(example, label, prediction)
+
+            if input_label == label:
+                if prediction == label:
+                    tp.append(predicted_example)
+                else:
+                    fn.append(predicted_example)
+            else:
+                if input_label == prediction:
+                    fp.append(predicted_example)
+                else:
+                    tn.append(predicted_example)
+
+        return {'fp': tp, 'fp': fp, 'tn': tn, 'fn': fn}
+
+
+        # tp = []
+        # fp = []
+        # tn = []
+        # fn = []
+
+        # for predicted_example in self.predicted_examples:
+        #     example, label, prediction = predicted_example
+        #     if input_label == label:
+        #         if prediction == label:
+        #             tp.append(predicted_example)
+        #         else:
+        #             fn.append(predicted_example)
+        #     else:
+        #         if input_label == prediction:
+        #             fp.append(predicted_example)
+        #         else:
+        #             tn.append(predicted_example)
+
+        # return {'fp': tp, 'fp': fp, 'tn': tn, 'fn': fn}
+
+    @property
+    def errors(self):
+        labels = {predicted_example.label for predicted_example in self.predicted_examples}
+        return { label: self.errors_for_label(label) for label in labels }
+
+
+def model_experiment(
+    featurizer, model,
+    train_examples, train_features, train_labels,
+    validation_examples, validation_features, validation_labels,
+    probability_threshold=0.5, verbose=True
+):
+    labelizer = LabelEncoder()
+    labelizer.fit(train_labels + validation_labels)
+    encoded_train_labels = labelizer.transform(train_labels)
+    encoded_validation_labels = labelizer.transform(validation_labels)
+
+    model.fit(train_features, encoded_train_labels)
+    train_predictions = _evaluate_model(model, labelizer, train_features, train_labels, probability_threshold, verbose)
+    validation_predictions = _evaluate_model(model, labelizer, validation_features, validation_labels, probability_threshold, verbose)
+
+    return Experiment(
+        featurizer, labelizer, model,
+        train_examples, train_features, train_labels, train_predictions,
+        validation_examples, validation_features, validation_labels, validation_predictions
+    )
 
 
 def experiment(
     featurizer,
     model,
-    labelizer,
     train_examples,
-    train_label_sets,
+    train_labels,
     validation_examples,
-    validation_label_sets,
+    validation_labels
 ):
     """
     - featurizer: a Featurizer
@@ -48,60 +130,63 @@ def experiment(
     train_features = featurizer.transform(train_examples)
     validation_features = featurizer.transform(validation_examples)
 
-    return model_experiment(featurizer, model, labelizer, train_features, train_label_sets, validation_features, validation_label_sets)
+
+    return model_experiment(featurizer, model, train_examples, train_features, train_labels, validation_examples, validation_features, validation_labels)
 
 
-def evaluate_model(model, features, label_sets, labelizer, probability_threshold):
-    predictions = labelizer.inverse_transform(model.predict(features) > probability_threshold)
-    evaluations = evaluate(label_sets, predictions)
-    return evaluations
+def _evaluate_model(model, labelizer, features, labels, probability_threshold, verbose):
+    predictions = labelizer.inverse_transform(model.predict(features))
+    if verbose:
+        report = classification_report(labels, predictions, zero_division=1)
+        print(report)
+
+    return predictions
 
 
-def _get_all_labels(label_sets):
-    return {label for labels in label_sets for label in labels}
 
-def group_by_result(examples, label_sets, prediction_sets):
-    all_labels = _get_all_labels(label_sets)
-    label_to_result_to_data = defaultdict(lambda: {result: [] for result in ('tp', 'fp', 'tn', 'fn')})
 
-    for example, labels, predictions in zip(examples, label_sets, prediction_sets):
-        for label in all_labels:
-            if label in labels:
-                if label in predictions:
-                    result = 'tp'
-                else:
-                    result = 'fn'
-            else:
-                if label in predictions:
-                    result = 'fp'
-                else:
-                    result = 'tn'
-            label_to_result_to_data[label][result].append((example, labels, predictions))
-    return label_to_result_to_data
+# def group_by_result(examples, labels, predictions):
+#     by_result = {result: [] for result in ('tp', 'fp', 'tn', 'fn')}
 
-def evaluate(label_sets, prediction_sets):
-    all_labels = _get_all_labels(label_sets)
+#     for example, label, prediction in zip(examples, label_sets, prediction_sets):
+#         assert label in (True, False)
+#         if label is True:
+#             if prediction is True:
+#                 result = 'tp'
+#             else:
+#                 result = 'fn'
+#         else:
+#             if prediction is True:
+#                 result = 'fp'
+#             else:
+#                 result = 'tn'
 
-    results = defaultdict(
-        lambda: {result: 0 for result in ("tp", "fp", "tn", "fn", "support")}
-    )
-    for labels, predictions in zip(label_sets, prediction_sets):
-        for label in all_labels:
-            if label in labels:
-                results[label]["support"] += 1
-            if label in labels:
-                if label in predictions:
-                    results[label]["tp"] += 1
-                else:
-                    results[label]["fn"] += 1
-            else:
-                if label in predictions:
-                    results[label]["fp"] += 1
-                else:
-                    results[label]["tn"] += 1
-    df = pd.DataFrame(results).T
-    df["precision"] = (df.tp / (df.tp + df.fp)).fillna(1.0)
-    df["recall"] = (df.tp / (df.tp + df.fn)).fillna(1.0)
-    df["f1"] = 2 * df.precision * df.recall / (df.precision + df.recall)
+#         by_result[result].append(PredictedExample(example, label, prediction))
+#     return by_result
 
-    return df.sort_values("f1")
+# def ___evaluate(label_sets, prediction_sets):
+#     all_labels = _get_all_labels(label_sets)
+
+#     results = defaultdict(
+#         lambda: {result: 0 for result in ("tp", "fp", "tn", "fn", "support")}
+#     )
+#     for labels, predictions in zip(label_sets, prediction_sets):
+#         for label in all_labels:
+#             if label in labels:
+#                 results[label]["support"] += 1
+#             if label in labels:
+#                 if label in predictions:
+#                     results[label]["tp"] += 1
+#                 else:
+#                     results[label]["fn"] += 1
+#             else:
+#                 if label in predictions:
+#                     results[label]["fp"] += 1
+#                 else:
+#                     results[label]["tn"] += 1
+#     df = pd.DataFrame(results).T
+#     df["precision"] = (df.tp / (df.tp + df.fp)).fillna(1.0)
+#     df["recall"] = (df.tp / (df.tp + df.fn)).fillna(1.0)
+#     df["f1"] = 2 * df.precision * df.recall / (df.precision + df.recall)
+
+#     return df.sort_values("f1")

@@ -1,4 +1,6 @@
 from tensorflow.keras.optimizers import Adam
+from sklearn import preprocessing
+
 
 from sklearn.linear_model import LogisticRegression
 from tensorflow import keras as K
@@ -13,6 +15,21 @@ class Model:
 
     def predict(self, features):
         return self.model.predict(features)
+
+
+class SimpleLrBow(Model):
+    def __init__(self):
+        super().__init__()
+        self.scaler = preprocessing.StandardScaler()
+        self.model = LogisticRegression(solver="liblinear", dual=True, max_iter=5000)
+
+    def fit(self, features, labels):
+        scaled_features = self.scaler.fit_transform(features)
+        self.model.fit(scaled_features, labels)
+
+    def predict(self, features):
+        scaled_features = self.scaler.transform(features)
+        return self.model.predict(scaled_features)
 
 
 class DenseTextualModel(Model):

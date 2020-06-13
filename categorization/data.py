@@ -1,7 +1,8 @@
+import json
+import random
+import typing
 from datetime import datetime
 from collections import defaultdict
-import json
-import typing
 
 import pandas as pd
 
@@ -34,16 +35,22 @@ class Example(typing.NamedTuple):
     stars: float
     state: str
     city: str
-    reviews: typing.List[Review]
+
+    # Note that this is a single review because we're classifying based on just one review.
+    review: Review
 
 
-def load_examples(business_ids, min_reviews=0, accepted_categories=None):
+def load_examples(business_ids, accepted_categories, reviews_per_business):
     """Return a list of `Example`s, one for each business.
 
-    - min_reviews: mininum reviews a business must have to be included.
+    Args:
+    - business_ids: only return businesses from this set
+    - accepted_categories: only return businesses that have one of htese categories
+    - reviews_per_business: the number of reviews to sample from each business, each of
+      which becomes an Example.
+
+    Note that exactly one of business's categories must be in `accepted_categories`.
     """
-    if accepted_categories is None:
-        accepted_categories = frozenset()
 
     all_reviews = load_reviews(business_ids)
     business_id_to_reviews = defaultdict(list)
@@ -52,32 +59,34 @@ def load_examples(business_ids, min_reviews=0, accepted_categories=None):
 
     examples = []
     labels = []
-    for business in load_json(BUSINESS_FILEPATH):
-        if business["business_id"] not in business_ids:
-            continue
-
-        if business["review_count"] < min_reviews:
+    for business in _load_json(BUSINESS_FILEPATH):
+        if business_ids is not None and business["business_id"] not in business_ids:
             continue
 
         categories = _parse_categories_string(business["categories"])
         valid_categories = accepted_categories.intersection(categories)
-        if not valid_categories:
+        if len(valid_categories) != 1:
             continue
+        (valid_category,) = valid_categories
 
         reviews = business_id_to_reviews[business["business_id"]]
-        examples.append(
-            Example(
-                business["business_id"],
-                business["name"],
-                business["review_count"],
-                business["stars"],
-                business["city"],
-                business["state"],
-                reviews,
-            )
-        )
+        if len(reviews) == 0:
+            continue
 
-        labels.append(valid_categories)
+        for review in random.sample(reviews, reviews_per_business):
+            examples.append(
+                Example(
+                    business["business_id"],
+                    business["name"],
+                    business["review_count"],
+                    business["stars"],
+                    business["city"],
+                    business["state"],
+                    review,
+                )
+            )
+
+            labels.append(valid_category)
 
     return examples, labels
 
@@ -85,7 +94,7 @@ def load_examples(business_ids, min_reviews=0, accepted_categories=None):
 def load_reviews(business_ids):
     """Return a list of Review objects for all reviews from the given business IDs."""
     reviews = []
-    for review in load_json(REVIEW_FILEPATH):
+    for review in _load_json(REVIEW_FILEPATH):
         if review["business_id"] not in business_ids:
             continue
 
@@ -106,44 +115,38 @@ def load_reviews(business_ids):
     return reviews
 
 
-def load_reviews_df(business_ids, limit=None):
-    records = []
-    for review in load_json(REVIEW_FILEPATH):
-        # TODO: can optimize this with a regex that checks for
-        # any of the valid business IDs before loading the json.
-        # E.g. "business_id":"ujmEBvifdJM6h6RLv4wQIg|..."
-        business_id = review["business_id"]
-        if business_id in business_ids:
-            records.append(review)
+# def load_reviews_df(business_ids, limit=None):
+#     records = []
+#     for review in _load_json(REVIEW_FILEPATH):
+#         # TODO: can optimize this with a regex that checks for
+#         # any of the valid business IDs before loading the json.
+#         # E.g. "business_id":"ujmEBvifdJM6h6RLv4wQIg|..."
+#         business_id = review["business_id"]
+#         if business_id in business_ids:
+#             records.append(review)
 
-        if limit is not None and len(records) > limit:
-            print("breaking:", limit, len(records))
-            break
+#         if limit is not None and len(records) > limit:
+#             print("breaking:", limit, len(records))
+#             break
 
-    df = pd.DataFrame.from_records(records)
-    return df
-    df["date"] = pd.to_datetime(df["date"])
-    return df
-
-
-def load_json(filepath):
-    with open(filepath, "r") as fh:
-        for line in fh:
-            yield json.loads(line)
+#     df = pd.DataFrame.from_records(records)
+#     return df
+#     df["date"] = pd.to_datetime(df["date"])
+#     return df
 
 
-def load_users_df(user_ids):
-    records = []
-    for user in load_json(USER_FILEPATH):
-        if user["user_id"] in user_ids:
-            records.append(user)
+# def load_users_df(user_ids):
+#     records = []
+#     for user in _load_json(USER_FILEPATH):
+#         if user["user_id"] in user_ids:
+#             records.append(user)
 
-    return pd.DataFrame.from_records(records)
+#     return pd.DataFrame.from_records(records)
 
 
 def load_business_df():
     records = []
-    for business in load_json(BUSINESS_FILEPATH):
+    for business in _load_json(BUSINESS_FILEPATH):
         if business["is_open"] == 1:
             records.append(
                 {
@@ -182,3 +185,9 @@ class CategoryTree:
             for category in self._categories
             if not category["parents"]
         }
+
+
+def _load_json(filepath):
+    with open(filepath, "r") as fh:
+        for line in fh:
+            yield json.loads(line)
